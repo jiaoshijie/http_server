@@ -24,11 +24,11 @@ impl Worker {
             let message = receiver.lock().unwrap().recv().unwrap();
             match message {
                 Message::NewJob(job) => {
-                    println!("Worker {} got a job; executing", id);
+                    // println!("Worker {} got a job; executing", id);
                     job();
                 }
                 Message::Terminate => {
-                    println!("Worker {} was told to terminate.", id);
+                    // println!("Worker {} was told to terminate.", id);
                     break;
                 }
             }
@@ -71,14 +71,14 @@ impl ThreadPool {
 
 impl Drop for ThreadPool {
     fn drop(&mut self) {
-        println!("Sending terminate message to all workers.");
+        // println!("Sending terminate message to all workers.");
 
         for _ in &self.workers {
             self.sender.send(Message::Terminate).unwrap();
         }
 
         for worker in &mut self.workers {
-            println!("Shutting down worker {}", worker.id);
+            // println!("Shutting down worker {}", worker.id);
             // worker.handler.take().unwrap().join().unwrap();
             if let Some(thread) = worker.handler.take() {
                 thread.join().unwrap();
