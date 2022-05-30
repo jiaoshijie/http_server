@@ -34,26 +34,27 @@ fn handle_connection(mut stream: TcpStream) {
 
     let (status_line, filename, isfile) = if buffer.starts_with(GET_REQUEST) {
         // (STATUS_200, "./hello.html")
+        // println!("{}", b_string);
         handle_get(&b_string)
     } else {  // if the head isn't `GET_REQUEST` print the client request info and return 404.html
         eprintln!("{}", b_string);
         (STATUS_404, PathBuf::from("./404.html"), true)
     };
-    let reponse;
+    let contents;
 
     if isfile {
-        let contents = fs::read_to_string(filename).unwrap();
-        reponse = format!(
-            "{}\r\nContent-Length: {}\r\n\r\n{}",
-            status_line,
-            contents.len(),
-            contents
-            );
+        contents = fs::read_to_string(filename).unwrap();
     } else {
         // TODO: handle dir
-        panic!("this is a dir!!!");
+        // panic!("this is a dir!!!");
+        contents = handle_dir(&filename);
     }
-
+    let reponse = format!(
+        "{}\r\nContent-Length: {}\r\n\r\n{}",
+        status_line,
+        contents.len(),
+        contents
+        );
     // println!("Request: {}", String::from_utf8_lossy(&buffer[..]));
     stream.write(reponse.as_bytes()).unwrap();
     stream.flush().unwrap();
@@ -62,9 +63,11 @@ fn handle_connection(mut stream: TcpStream) {
 fn handle_get(req_info: &String) -> (&'static str, PathBuf, bool) {
     // TODO: don't handle spaces when file name has.
     let file_name = req_info.lines().collect::<Vec<&str>>()[0].split(" ").collect::<Vec<&str>>()[1];
+    // TODO: why can't use `cwd.join()`?
     let cwd = env::current_dir().expect("runtime error: cwd error").to_str().unwrap().to_string();
+    // TODO: check if is absolute path or relative path
     let mut full_path = path_join(&cwd, file_name);
-    println!("{}", full_path.display());
+    // println!("{}", full_path.display());
     let isfile;
     if is_exist(&full_path) && is_file(&full_path) {  // is file
         isfile = true
@@ -96,4 +99,20 @@ fn have_index_html(dir: &str) -> (PathBuf, bool) {
     } else {
         (path_join(dir, "/"), false)  // TODO
     }
+}
+
+fn handle_dir(dirname: &PathBuf) -> String {
+    // TODO: `.` `..`
+    let mut list_dir = String::new();
+    for entry in dirname.read_dir().expect("read_dir call failed") {
+        if let Ok(entry) = entry {
+            list_dir = format!("{}<a href=\"{}\">{}</a><br>",
+            list_dir,
+            entry.path().to_str().unwrap(),
+            entry.path().file_name().unwrap().to_str().unwrap(),
+            );
+            println!("{}", entry.path().to_str().unwrap());
+        }
+    }
+    format!("<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"> <title>{}</title></head><body><p>list:<br>{}</p></body></html>", dirname.file_name().unwrap().to_str().unwrap(), list_dir)
 }
