@@ -69,6 +69,7 @@ impl ThreadPool {
     }
 }
 
+// TODO: catch Ctrl-C to run this.
 impl Drop for ThreadPool {
     fn drop(&mut self) {
         // println!("Sending terminate message to all workers.");
@@ -78,7 +79,7 @@ impl Drop for ThreadPool {
         }
 
         for worker in &mut self.workers {
-            // println!("Shutting down worker {}", worker.id);
+            println!("Shutting down worker {}", worker.id);
             // worker.handler.take().unwrap().join().unwrap();
             if let Some(thread) = worker.handler.take() {
                 thread.join().unwrap();

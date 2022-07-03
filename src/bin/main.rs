@@ -1,9 +1,7 @@
-use std::io::prelude::*;
-use std::path::{Path, PathBuf};
 use std::fs;
+use std::io::prelude::*;
 use std::net::{TcpListener, TcpStream};
-// use std::process;  // for exit
-use std::env;
+use std::path::PathBuf;
 
 use live_server::ThreadPool;
 
@@ -13,7 +11,7 @@ const STATUS_200: &str = "HTTP/1.1 200 OK";
 const STATUS_404: &str = "HTTP/1.1 404 NOT FOUND";
 
 fn main() {
-    let listener = TcpListener::bind("10.61.19.236:7878").unwrap();
+    let listener = TcpListener::bind("127.0.0.1:7878").unwrap();
     let pool = ThreadPool::new(4);
 
     for stream in listener.incoming() {
@@ -30,89 +28,93 @@ fn handle_connection(mut stream: TcpStream) {
 
     stream.read(&mut buffer).unwrap();
     let b_string = String::from_utf8_lossy(&buffer).to_string();
-
-
-    let (status_line, filename, isfile) = if buffer.starts_with(GET_REQUEST) {
-        // (STATUS_200, "./hello.html")
-        // println!("{}", b_string);
+    let (status_line, requets_path, is_file) = if buffer.starts_with(GET_REQUEST) {
         handle_get(&b_string)
-    } else {  // if the head isn't `GET_REQUEST` print the client request info and return 404.html
+    } else {
         eprintln!("{}", b_string);
-        (STATUS_404, PathBuf::from("./404.html"), true)
+        (STATUS_404, String::from("./404.html"), true)
     };
     let contents;
-
-    if isfile {
-        contents = fs::read_to_string(filename).unwrap();
+    if is_file {
+        let requets_path = PathBuf::from(&format!("{}{}", ".", requets_path));
+        contents = fs::read_to_string(requets_path).unwrap();
     } else {
-        // TODO: handle dir
-        // panic!("this is a dir!!!");
-        contents = handle_dir(&filename);
+        contents = handle_dir(requets_path);
     }
     let reponse = format!(
         "{}\r\nContent-Length: {}\r\n\r\n{}",
         status_line,
         contents.len(),
         contents
-        );
-    // println!("Request: {}", String::from_utf8_lossy(&buffer[..]));
+    );
     stream.write(reponse.as_bytes()).unwrap();
     stream.flush().unwrap();
 }
 
-fn handle_get(req_info: &String) -> (&'static str, PathBuf, bool) {
-    // TODO: don't handle spaces when file name has.
-    let file_name = req_info.lines().collect::<Vec<&str>>()[0].split(" ").collect::<Vec<&str>>()[1];
-    // TODO: why can't use `cwd.join()`?
-    let cwd = env::current_dir().expect("runtime error: cwd error").to_str().unwrap().to_string();
-    // TODO: check if is absolute path or relative path
-    let mut full_path = path_join(&cwd, file_name);
-    // println!("{}", full_path.display());
-    let isfile;
-    if is_exist(&full_path) && is_file(&full_path) {  // is file
-        isfile = true
-    } else if is_exist(&full_path) {  // is dir
-        (full_path, isfile) = have_index_html(full_path.to_str().unwrap());
+fn handle_get(request_info: &String) -> (&'static str, String, bool) {
+    let path_str = request_info
+        .lines()
+        .next()
+        .unwrap()
+        .split(" ")
+        .nth(1)
+        .unwrap();
+    let mut path_str = handle_special_chars(path_str);
+    let relative_path = PathBuf::from(&format!("{}{}", ".", path_str));
+    // println!("{}", relative_path.to_str().unwrap());
+    // println!("{}", relative_path.exists());
+    let is_file;
+    if relative_path.exists() && relative_path.is_file() {
+        is_file = true;
+    } else if relative_path.exists() {
+        (path_str, is_file) = have_index_html(path_str);
     } else {
-        return (STATUS_404, PathBuf::from("./404.html"), true);
+        return (STATUS_404, String::from("./404.html"), true);
     }
-
-    (STATUS_200, full_path, isfile)
+    (STATUS_200, path_str, is_file)
 }
 
-fn is_exist(file: &PathBuf) -> bool {
-    file.exists()
+fn handle_special_chars(path_str: &str) -> String {
+    // TODO: make a map to replace sepcial chars
+    path_str.replace("%20", " ")
 }
 
-fn is_file(file: &PathBuf) -> bool {
-    file.is_file()
-}
-
-fn path_join(dir: &str, file: &str) -> PathBuf {
-    PathBuf::from(&format!("{}{}", dir, file))
-}
-
-fn have_index_html(dir: &str) -> (PathBuf, bool) {
-    let full_path = path_join(dir, "index.html");
-    if is_exist(&full_path) && is_file(&full_path) {
-        (full_path, true)
+fn have_index_html(path: String) -> (String, bool) {
+    let relative_path = PathBuf::from(&format!("{}{}", ".", path));
+    let ipath = relative_path.join("index.html");
+    if ipath.exists() && ipath.is_file() {
+        (format!("{}/{}", path, "index.html"), true)
     } else {
-        (path_join(dir, "/"), false)  // TODO
+        // TODO: maybe path.is_dir()
+        let f;
+        if path.ends_with('/') {
+            f = "";
+        } else {
+            f = "/";
+        }
+        (format!("{}{}", path, f), false)
     }
 }
 
-fn handle_dir(dirname: &PathBuf) -> String {
-    // TODO: `.` `..`
-    let mut list_dir = String::new();
-    for entry in dirname.read_dir().expect("read_dir call failed") {
+fn handle_dir(path: String) -> String {
+    let mut list_dir = Vec::new();
+    let relative_path = PathBuf::from(&format!("{}{}", ".", path));
+    for entry in relative_path.read_dir().expect("read_dir call failed") {
         if let Ok(entry) = entry {
-            list_dir = format!("{}<a href=\"{}\">{}</a><br>",
-            list_dir,
-            entry.path().to_str().unwrap(),
-            entry.path().file_name().unwrap().to_str().unwrap(),
-            );
-            println!("{}", entry.path().to_str().unwrap());
+            let f;
+            if entry.path().is_file() {
+                f = "";
+            } else {
+                f = "/";
+            }
+            list_dir.push(format!(
+                "<a href=\"{}{}{}\">{}</a><br>",
+                path,
+                entry.path().file_name().unwrap().to_str().unwrap(),
+                f,
+                entry.path().file_name().unwrap().to_str().unwrap()
+            ));
         }
     }
-    format!("<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"> <title>{}</title></head><body><p>list:<br>{}</p></body></html>", dirname.file_name().unwrap().to_str().unwrap(), list_dir)
+    format!("<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"> <title>{}</title></head><body><p>list:<br>{}</p></body></html>", relative_path.file_name().unwrap().to_str().unwrap(), list_dir.concat())
 }
