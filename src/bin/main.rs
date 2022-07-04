@@ -32,22 +32,30 @@ fn handle_connection(mut stream: TcpStream) {
         handle_get(&b_string)
     } else {
         eprintln!("{}", b_string);
-        (STATUS_404, String::from("./404.html"), true)
+        (STATUS_404, String::from("/404.html"), true)
     };
-    let contents;
+    let reponse;
     if is_file {
         let requets_path = PathBuf::from(&format!("{}{}", ".", requets_path));
-        contents = fs::read_to_string(requets_path).unwrap();
+        // contents = fs::read_to_string(requets_path).unwrap();
+        let contents = fs::read(requets_path).unwrap();
+        reponse = format!(
+            "{}\r\nContent-Length: {}\r\n\r\n",
+            status_line,
+            contents.len(),
+        );
+        stream.write(reponse.as_bytes()).unwrap();
+        stream.write(&contents[..]).unwrap();
     } else {
-        contents = handle_dir(requets_path);
+        let dir_list = handle_dir(requets_path);
+        reponse = format!(
+            "{}\r\nContent-Length: {}\r\n\r\n{}",
+            status_line,
+            dir_list.len(),
+            dir_list
+        );
+        stream.write(reponse.as_bytes()).unwrap();
     }
-    let reponse = format!(
-        "{}\r\nContent-Length: {}\r\n\r\n{}",
-        status_line,
-        contents.len(),
-        contents
-    );
-    stream.write(reponse.as_bytes()).unwrap();
     stream.flush().unwrap();
 }
 
@@ -61,15 +69,13 @@ fn handle_get(request_info: &String) -> (&'static str, String, bool) {
         .unwrap();
     let mut path_str = handle_special_chars(path_str);
     let relative_path = PathBuf::from(&format!("{}{}", ".", path_str));
-    // println!("{}", relative_path.to_str().unwrap());
-    // println!("{}", relative_path.exists());
     let is_file;
     if relative_path.exists() && relative_path.is_file() {
         is_file = true;
     } else if relative_path.exists() {
         (path_str, is_file) = have_index_html(path_str);
     } else {
-        return (STATUS_404, String::from("./404.html"), true);
+        return (STATUS_404, String::from("/404.html"), true);
     }
     (STATUS_200, path_str, is_file)
 }
@@ -116,5 +122,6 @@ fn handle_dir(path: String) -> String {
             ));
         }
     }
+    // TODO: dir style
     format!("<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"> <title>{}</title></head><body><p>list:<br>{}</p></body></html>", relative_path.file_name().unwrap().to_str().unwrap(), list_dir.concat())
 }
