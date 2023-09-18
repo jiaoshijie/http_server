@@ -13,5 +13,3 @@ path = "src/main.rs"
 log = "0.4"
 simplelog = "0.12"
 tokio = { version = "1", features = ["full"] }
-http = "0.2"
-httparse = "1.8"
