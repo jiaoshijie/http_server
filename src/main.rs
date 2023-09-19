@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 use tokio::fs::File;
 use tokio::io::SeekFrom;
-use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
+use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt, BufReader};
+use tokio::net::tcp::OwnedReadHalf;
 use tokio::net::{TcpListener, TcpStream};
 
 // #[tokio::main]
@@ -80,6 +81,7 @@ use tokio::net::{TcpListener, TcpStream};
 //     }
 // }
 
+#[derive(Debug)]
 enum Method {
     Get,
     Head,
@@ -94,6 +96,26 @@ enum Method {
     NonStandard(String),
 }
 
+impl std::str::FromStr for Method {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
+            "GET" => Self::Get,
+            "HEAD" => Self::Head,
+            "POST" => Self::Post,
+            "PUT" => Self::Put,
+            "DELETE" => Self::Delete,
+            "CONNECT" => Self::Connect,
+            "OPTIONS" => Self::Options,
+            "TRACE" => Self::Trace,
+            "PATCH" => Self::Patch,
+            s => Self::NonStandard(s.to_string()),
+        })
+    }
+}
+
+#[derive(Debug)]
 pub struct HttpVersion(pub u8, pub u8);
 
 impl std::fmt::Display for HttpVersion {
@@ -102,6 +124,19 @@ impl std::fmt::Display for HttpVersion {
     }
 }
 
+fn parse_http_version(s: &str) -> Option<HttpVersion> {
+    let (major, minor) = match s {
+        "HTTP/0.9" => (0, 9),
+        "HTTP/1.0" => (1, 0),
+        "HTTP/1.1" => (1, 1),
+        "HTTP/2.0" => (2, 0),
+        "HTTP/3.0" => (3, 0),
+        _ => return None, // BUG
+    };
+    Some(HttpVersion(major, minor))
+}
+
+#[derive(Debug)]
 struct Request {
     method: Method,
     version: HttpVersion,
@@ -111,19 +146,61 @@ struct Request {
 }
 
 impl Request {
-    pub async fn parse(read: &mut TcpStream) -> Self {
-        loop {
-            let buf = &mut [0; 1024];
+    pub async fn parse(read: OwnedReadHalf) -> Self {
+        let mut reader = BufReader::new(read);
+        let line = Request::read_line(&mut reader).await.unwrap();
+        let line = std::str::from_utf8(&line).unwrap();
+        let mut parts = line.split(' ');
+        let method = parts.next().and_then(|m| m.parse().ok()).unwrap();
+        let path = parts.next().unwrap().to_owned();
+        let version = parts.next().and_then(parse_http_version).unwrap();
+        let mut headers = HashMap::new();
+        while let Some(line) = Request::read_line(&mut reader).await {
+            if line.is_empty() {
+                break;
+            }
+            let line = std::str::from_utf8(&line).unwrap();
+            let mut parts = line.split(':');
+            headers.insert(
+                parts.next().unwrap().to_owned(),
+                parts.next().unwrap().trim_start().to_owned(),
+            );
         }
-        todo!()
+        Self {
+            method,
+            path,
+            version,
+            headers,
+            body: None,
+        }
+    }
+
+    async fn read_line(reader: &mut BufReader<OwnedReadHalf>) -> Option<Vec<u8>> {
+        let mut line = Vec::new();
+        let mut prev_char_was_cr = false;
+        loop {
+            match reader.read_u8().await {
+                Ok(b) => {
+                    if b == b'\n' && prev_char_was_cr {
+                        line.pop();
+                        return Some(line);
+                    }
+                    prev_char_was_cr = b == b'\r';
+                    line.push(b);
+                }
+                Err(_) => return None,
+            }
+        }
     }
 }
 
 #[tokio::main]
 async fn main() {
-    let ipaddr = "127.0.0.1:8888";
+    let ipaddr = "192.168.56.103:8888";
     let listener = TcpListener::bind(ipaddr).await.unwrap();
     println!("{ipaddr}");
-    let (mut sock, _) = listener.accept().await.unwrap();
-    Request::parse(&mut sock).await;
+    let (sock, _) = listener.accept().await.unwrap();
+    let (reader, writer) = sock.into_split();
+    let rq = Request::parse(reader).await;
+    println!("{rq:?}");
 }
